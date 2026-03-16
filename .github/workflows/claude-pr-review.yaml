@@ -1,14 +1,15 @@
+# Integrates Claude Code as an AI assistant for reviewing pull requests.
 # For tips how to configure this workflow, see https://github.com/anthropics/claude-code-action.
 # Examples: https://github.com/anthropics/claude-code-action/blob/0cf5eeec4f908121edd03a81411b55485994f8d3/docs/solutions.md.
 #
-# Architecture: three jobs for least-privilege separation:
-#   1. "setup"  — posts a "reviewing…" tracking comment (write permissions)
-#   2. "review" — runs Claude with read-only permissions, produces structured JSON
-#   3. "post"   — reads the JSON and posts comments to the PR (write permissions)
+# Architecture: The workflow is split into three jobs for least-privilege:
+#   1. "setup"  - posts/updates a "reviewing…" tracking comment (write permissions)
+#   2. "review" - runs Claude with read-only permissions, produces structured JSON
+#   3. "post"   - reads the JSON and posts comments to the PR (write permissions)
 
 name: Claude PR Review
 on:
-    # _target gives forks access to upstream's secrets.
+    # _target gives forks access to upstream's secrets and identity.
     pull_request_target:
         types: [opened, synchronize]
         branches: [main]
@@ -18,7 +19,6 @@ concurrency:
 
 jobs:
     setup:
-        # Posts a "reviewing..." comment immediately so the PR author gets instant feedback.
         runs-on: ubuntu-latest
         env:
             PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -39,12 +39,10 @@ jobs:
                       const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
                       const MARKER = "<!-- claude-pr-review -->";
 
-                      const {data: issueComments} = await github.rest.issues.listComments({
-                        owner,
-                        repo,
-                        issue_number: prNumber,
-                        per_page: 100,
-                      });
+                      const issueComments = await github.paginate(
+                        github.rest.issues.listComments,
+                        { owner, repo, issue_number: prNumber, per_page: 100 },
+                      );
 
                       const existing = issueComments.find((c) => c.body && c.body.includes(MARKER));
 
@@ -73,8 +71,6 @@ jobs:
                       core.setOutput("comment_id", commentId);
 
     review:
-        # Runs Claude with read-only permissions. Produces structured JSON output
-        # containing review comments and a summary. Does NOT post anything.
         runs-on: ubuntu-latest
         needs: setup
         permissions:
@@ -110,7 +106,7 @@ jobs:
                             "type": "array",
                             "items": {
                               "type": "object",
-                              "required": ["file", "line", "severity", "body"],
+                              "required": ["file", "severity", "body"],
                               "properties": {
                                 "file": {
                                   "type": "string",
@@ -281,24 +277,29 @@ jobs:
                   # https://github.com/anthropics/claude-code-action/issues/939
                   track_progress: false
 
+                  # Show logs and Claude reasoning
+                  show_full_output: true
+
                   # Enable access to other GH Actions outputs
                   additional_permissions: |
                       actions: read
 
     post:
-        # Reads Claude's structured JSON output and posts comments to the PR.
         runs-on: ubuntu-latest
         needs: [setup, review]
         if: always() && needs.setup.result == 'success'
+
         permissions:
             pull-requests: write
+
         steps:
             - name: Post review comments
               uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
               env:
                   STRUCTURED_OUTPUT: ${{ needs.review.outputs.structured_output }}
-                  PR_NUMBER: ${{ github.event.pull_request.number }}
-                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+                  REVIEW_RESULT: ${{ needs.review.result }}
+                  PR_NUMBER: ${{ needs.setup.outputs.pr_number }}
+                  HEAD_SHA: ${{ needs.setup.outputs.head_sha }}
                   COMMENT_ID: ${{ needs.setup.outputs.comment_id }}
               with:
                   script: |
@@ -311,8 +312,8 @@ jobs:
                       const MARKER = "<!-- claude-pr-review -->";
 
                       /* If the review job failed or was cancelled, update the tracking
-                       * comment to reflect that and bail out. */
-                      if ("${{ needs.review.result }}" !== "success") {
+                      * comment to reflect that and bail out. */
+                      if (process.env.REVIEW_RESULT !== "success") {
                         await github.rest.issues.updateComment({
                           owner,
                           repo,
@@ -338,17 +339,23 @@ jobs:
                           if (typeof review.summary === "string")
                             summary = review.summary;
                         } catch (e) {
-                          console.log(`Failed to parse structured output: ${e.message}`);
+                          core.warning(`Failed to parse structured output: ${e.message}`);
                         }
                       }
 
                       console.log(`Claude produced ${comments.length} review comment(s).`);
 
-                      /* Post each inline comment individually. Using individual comments
-                       * (rather than a review) means re-runs only add new comments instead
-                       * of creating a whole new review. */
+                      /* Post each inline comment individually. Deduplication against existing
+                      * comments is handled by Claude in the prompt, so we just post whatever
+                      * it returns. Using individual comments (rather than a review) means
+                      * re-runs only add new comments instead of creating a whole new review. */
+                      const inlineComments = comments.filter((c) => c.line);
+                      const skipped = comments.length - inlineComments.length;
+                      if (skipped > 0)
+                        console.log(`Skipping ${skipped} file-level comment(s) (no line number).`);
+
                       let posted = 0;
-                      for (const c of comments) {
+                      for (const c of inlineComments) {
                         console.log(`  Posting comment on ${c.file}:${c.line}`);
                         try {
                           await github.rest.pulls.createReviewComment({
@@ -363,25 +370,25 @@ jobs:
                           posted++;
                         } catch (e) {
                           /* GitHub rejects comments on lines outside the diff context. Log
-                           * and continue — the tracking comment still contains all findings. */
+                          * and continue — the tracking comment still contains all findings. */
                           console.log(`  Warning: failed to post comment on ${c.file}:${c.line}: ${e.message}`);
                         }
                       }
 
                       if (posted > 0)
-                        console.log(`Posted ${posted}/${comments.length} inline comment(s).`);
-                      else if (comments.length > 0)
-                        console.log(`Could not post any of ${comments.length} inline comment(s) — see warnings above.`);
+                        console.log(`Posted ${posted}/${inlineComments.length} inline comment(s).`);
+                      else if (inlineComments.length > 0)
+                        console.log(`Could not post any of ${inlineComments.length} inline comment(s) — see warnings above.`);
                       else
                         console.log("No inline comments to post.");
 
-                      const failed = comments.length > 0 && posted < comments.length;
+                      const failed = inlineComments.length > 0 && posted < inlineComments.length;
 
                       /* Update the tracking comment with Claude's summary. */
                       if (!summary)
                         summary = "Claude review: no issues found :tada:\n\n" + MARKER;
                       else if (!summary.includes(MARKER))
-                        summary = summary.replace(/\n/, `\n${MARKER}\n`);
+                        summary += "\n\n" + MARKER;
                       summary += `\n\n[Workflow run](${runUrl})`;
 
                       await github.rest.issues.updateComment({
