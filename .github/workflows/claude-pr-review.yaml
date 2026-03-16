@@ -345,11 +345,12 @@ jobs:
                       /* If the review job failed or was cancelled, update the tracking
                        * comment to reflect that and bail out. */
                       if (process.env.REVIEW_RESULT !== "success") {
+                        const verb = process.env.REVIEW_RESULT === "cancelled" ? "was cancelled" : "failed";
                         await github.rest.issues.updateComment({
                           owner,
                           repo,
                           comment_id: commentId,
-                          body: `Claude review failed — see [workflow run](${runUrl}) for details.\n\n${MARKER}`,
+                          body: `Claude review ${verb} — see [workflow run](${runUrl}) for details.\n\n${MARKER}`,
                         });
                         core.setFailed("Review job did not succeed.");
                         return;
@@ -396,6 +397,8 @@ jobs:
                             commit_id: headSha,
                             path: c.file,
                             line: c.line,
+                            side: "RIGHT",
+                            subject_type: "line",
                             body: `Claude: **${c.severity}**: ${c.body}`,
                           });
                           posted++;
@@ -413,8 +416,6 @@ jobs:
                       else
                         console.log("No inline comments to post.");
 
-                      const failed = inlineComments.length > 0 && posted < inlineComments.length;
-
                       /* Update the tracking comment with Claude's summary. */
                       if (!summary)
                         summary = "Claude review: no issues found :tada:\n\n" + MARKER;
@@ -431,5 +432,7 @@ jobs:
 
                       console.log("Tracking comment updated successfully.");
 
-                      if (failed)
-                        core.setFailed(`Failed to post ${inlineComments.length - posted}/${inlineComments.length} inline comment(s).`);
+                      if (inlineComments.length > 0 && posted === 0)
+                        core.setFailed(`Could not post any of ${inlineComments.length} inline comment(s) — see warnings above.`);
+                      else if (posted < inlineComments.length)
+                        core.warning(`${inlineComments.length - posted}/${inlineComments.length} inline comment(s) could not be posted.`);
