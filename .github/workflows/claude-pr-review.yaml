@@ -158,8 +158,9 @@ jobs:
                       HEAD SHA: ${{ github.event.pull_request.head.sha }}
 
                       You are a code reviewer for the ${{ github.repository }} project. Review this pull request and
-                      produce a structured JSON result. Do NOT attempt to post comments yourself — just return the JSON.
-                      You are in the upstream repo without the patch applied. Do not apply it.
+                      produce a structured JSON result containing your review. Do NOT attempt
+                      to post comments yourself — just return the JSON. You are in the upstream repo
+                      without the patch applied. Do not apply it.
 
                       ## Phase 1: Gather context
 
@@ -195,10 +196,11 @@ jobs:
                       Each subagent must return a JSON array of issues:
                       `[{"file": "path", "line": <number>, "severity": "must-fix|suggestion|nit", "body": "..."}]`
 
-                      `line` must be a line number from the NEW side of the diff **that appears inside
+                      `line` should be a line number from the NEW side of the diff **that appears inside
                       a diff hunk** (i.e. a line that is shown in the patch output). GitHub's review
                       comment API rejects lines outside the diff context, so never reference lines
-                      that are not visible in the patch.
+                      that are not visible in the patch. If you cannot determine a valid diff line,
+                      omit `line` — the comment will still appear in the tracking comment summary.
 
                       Each subagent MUST verify its findings before returning them:
                       - For style/convention claims, check at least 3 existing examples in the codebase to confirm
@@ -217,8 +219,9 @@ jobs:
                          comment if one already exists on the same file and line about the same problem.
                          Also check for author replies that dismiss or reject a previous comment — do NOT
                          re-raise an issue the PR author has already responded to disagreeing with.
-                      5. Prefix ALL comment bodies with a severity tag: `**must-fix**: `, `**suggestion**: `,
-                         or `**nit**: `.
+                      5. Do NOT prefix `body` with a severity tag — the severity is already
+                         captured in the `severity` field and will be added automatically when
+                         posting inline comments.
                       6. Write a `summary` field in markdown for a top-level tracking comment.
 
                          **If no existing tracking comment was found (first run):**
@@ -245,13 +248,6 @@ jobs:
                          Omit empty sections. Each checkbox item must correspond to an entry in `comments`.
                          If there are no issues at all, write a short message saying the PR looks good.
 
-                         Throughout all phases, track any errors that prevented you from doing
-                         your job fully: permission denials (403, "Resource not accessible by
-                         integration"), tools that were not available, rate limits, or any other
-                         failures that degraded the review quality. If there were any, append a
-                         `### Errors` section listing each failed tool/action and the error
-                         message, so maintainers can fix the workflow configuration.
-
                          **If an existing tracking comment was found (subsequent run):**
                          Use the existing comment as the starting point. Preserve the order and wording
                          of all existing items. Then apply these updates:
@@ -264,6 +260,15 @@ jobs:
                          - Append any NEW issues found in this run that aren't already listed,
                            in the appropriate severity section, after the existing items.
                          - Do NOT reorder, reword, or remove existing items.
+
+                      ## Error tracking
+
+                      Throughout all phases, track any errors that prevented you from doing
+                      your job fully: permission denials (403, "Resource not accessible by
+                      integration"), tools that were not available, rate limits, or any other
+                      failures that degraded the review quality. If there were any, append a
+                      `### Errors` section listing each failed tool/action and the error
+                      message, so maintainers can fix the workflow configuration.
 
                       ## CRITICAL: Return structured JSON output
 
@@ -391,7 +396,7 @@ jobs:
                             commit_id: headSha,
                             path: c.file,
                             line: c.line,
-                            body: `Claude: ${c.body}`,
+                            body: `Claude: **${c.severity}**: ${c.body}`,
                           });
                           posted++;
                         } catch (e) {
