@@ -194,7 +194,7 @@ jobs:
                       Give each subagent the PR title, description, full patch, and the list of changed files.
 
                       Each subagent must return a JSON array of issues:
-                      `[{"file": "path", "line": <number>, "severity": "must-fix|suggestion|nit", "body": "..."}]`
+                      `[{"file": "path", "line": <number> (optional), "severity": "must-fix|suggestion|nit", "body": "..."}]`
 
                       `line` should be a line number from the NEW side of the diff **that appears inside
                       a diff hunk** (i.e. a line that is shown in the patch output). GitHub's review
