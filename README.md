@@ -6,6 +6,8 @@ posts detailed feedback via GitHub comments (inline and top-level).
 With Opus 4.6 model, it takes about 2 minutes to review a trivial PR, and costs about $0.6 in tokens.
 For a typical PR with a few changed files, it takes about 10 minutes and costs about $10 in tokens.
 
+Made by @pzmarzly and @daandemeyer.
+
 ## Demo
 
 TypeScript is awesome! Python files not welcome here.
@@ -25,10 +27,10 @@ Copy [claude-pr-review.yaml](./.github/workflows/claude-pr-review.yaml) to your 
 
 ## Compared to [Claude Code Review](https://code.claude.com/docs/en/code-review)
 
-| claude-pr-review        | Claude Code Review                              |
-| ----------------------- | ----------------------------------------------- |
-| Based on GH Actions     | GitHub App                                      |
-| Can read entire repo    | Can read entire repo                            |
-| Detailed feedback       | More detailed feedback                          |
-| Costs $10-15 per review | Costs $20-100 per review                        |
-| BYOK                    | Requires Claude Team or Enterprise subscription |
+| claude-pr-review              | Claude Code Review                              |
+| ----------------------------- | ----------------------------------------------- |
+| Based on GH Actions           | GitHub App                                      |
+| Works on fork-to-upstream PRs | Requires same-repo PR                           |
+| Detailed feedback             | More detailed feedback                          |
+| Costs $10-15 per review       | Costs $20-100 per review                        |
+| BYOK                          | Requires Claude Team or Enterprise subscription |
