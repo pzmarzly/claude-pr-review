@@ -27,10 +27,21 @@ jobs:
             pull-requests: write
         outputs:
             comment_id: ${{ steps.tracking.outputs.comment_id }}
+            pr_number: ${{ steps.pr.outputs.number }}
+            head_sha: ${{ steps.pr.outputs.head_sha }}
         steps:
+            - name: Resolve PR metadata
+              id: pr
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+                  gh pr view --repo "${{ github.repository }}" "$PR_NUMBER" --json headRefOid --jq '.headRefOid' | \
+                    xargs -I{} echo "head_sha={}" >> "$GITHUB_OUTPUT"
+
             - name: Create or update tracking comment
               id: tracking
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
               with:
                   script: |
                       const owner = context.repo.owner;
@@ -49,6 +60,7 @@ jobs:
                       let commentId;
                       if (existing) {
                         console.log(`Updating existing tracking comment ${existing.id}.`);
+                        /* Prepend a re-reviewing banner but keep the previous review visible. */
                         const prevBody = existing.body.replace(/\n\n\[Workflow run\]\([^)]*\)$/, "");
                         await github.rest.issues.updateComment({
                           owner,
@@ -100,7 +112,7 @@ jobs:
                         "properties": {
                           "summary": {
                             "type": "string",
-                            "description": "Markdown summary for the top-level tracking comment"
+                            "description": "A markdown summary of the review to post as a top-level tracking comment"
                           },
                           "comments": {
                             "type": "array",
@@ -110,11 +122,11 @@ jobs:
                               "properties": {
                                 "file": {
                                   "type": "string",
-                                  "description": "Path relative to repo root"
+                                  "description": "Path to the file relative to the repo root"
                                 },
                                 "line": {
                                   "type": "integer",
-                                  "description": "Line number on the new side of the diff"
+                                  "description": "Line number in the diff (new file side) to attach the comment to"
                                 },
                                 "severity": {
                                   "type": "string",
@@ -122,7 +134,7 @@ jobs:
                                 },
                                 "body": {
                                   "type": "string",
-                                  "description": "Review comment body in markdown"
+                                  "description": "The review comment body in markdown"
                                 }
                               }
                             }
@@ -133,6 +145,10 @@ jobs:
                   # Anthropic/OpenRouter auth
                   anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
                   # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+                  # We still have to pass GITHUB_TOKEN here because claude-code-action
+                  # requires it, but we restrict Claude's tools to read-only operations
+                  # so it cannot post comments or modify the PR.
                   github_token: ${{ secrets.GITHUB_TOKEN }}
 
                   # Prompt
@@ -205,11 +221,11 @@ jobs:
                          or `**nit**: `.
                       6. Write a `summary` field in markdown for a top-level tracking comment.
 
-                         **If no existing tracking comment with review content was found (first run):**
+                         **If no existing tracking comment was found (first run):**
                          Use this format:
 
                          ```
-                         ## Claude review of ${{ github.repository }} #${{ github.event.pull_request.number }} (${{ github.event.pull_request.head.sha }})
+                         ## Claude review of PR #<number> (<HEAD SHA>)
 
                          <!-- claude-pr-review -->
 
@@ -236,7 +252,7 @@ jobs:
                          `### Errors` section listing each failed tool/action and the error
                          message, so maintainers can fix the workflow configuration.
 
-                         **If an existing tracking comment with review content was found (subsequent run):**
+                         **If an existing tracking comment was found (subsequent run):**
                          Use the existing comment as the starting point. Preserve the order and wording
                          of all existing items. Then apply these updates:
                          - Update the HEAD SHA in the header line.
@@ -249,7 +265,17 @@ jobs:
                            in the appropriate severity section, after the existing items.
                          - Do NOT reorder, reword, or remove existing items.
 
-                      Return the final JSON object with your `comments` array and `summary` string.
+                      ## CRITICAL: Return structured JSON output
+
+                      Your FINAL action must be to return a JSON object matching the following
+                      JSON schema — do NOT end with a text summary or narrative. The `--json-schema`
+                      flag is set, so your last response must be the structured JSON result, not a
+                      text message.
+
+                      ```json
+                      ${{ env.REVIEW_SCHEMA }}
+                      ```
+
                       Do NOT attempt to post comments or use any MCP tools to modify the PR.
                   claude_args: |
                       --max-turns 100
@@ -294,7 +320,7 @@ jobs:
 
         steps:
             - name: Post review comments
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
               env:
                   STRUCTURED_OUTPUT: ${{ needs.review.outputs.structured_output }}
                   REVIEW_RESULT: ${{ needs.review.result }}
@@ -312,7 +338,7 @@ jobs:
                       const MARKER = "<!-- claude-pr-review -->";
 
                       /* If the review job failed or was cancelled, update the tracking
-                      * comment to reflect that and bail out. */
+                       * comment to reflect that and bail out. */
                       if (process.env.REVIEW_RESULT !== "success") {
                         await github.rest.issues.updateComment({
                           owner,
@@ -346,9 +372,9 @@ jobs:
                       console.log(`Claude produced ${comments.length} review comment(s).`);
 
                       /* Post each inline comment individually. Deduplication against existing
-                      * comments is handled by Claude in the prompt, so we just post whatever
-                      * it returns. Using individual comments (rather than a review) means
-                      * re-runs only add new comments instead of creating a whole new review. */
+                       * comments is handled by Claude in the prompt, so we just post whatever
+                       * it returns. Using individual comments (rather than a review) means
+                       * re-runs only add new comments instead of creating a whole new review. */
                       const inlineComments = comments.filter((c) => c.line);
                       const skipped = comments.length - inlineComments.length;
                       if (skipped > 0)
@@ -370,7 +396,7 @@ jobs:
                           posted++;
                         } catch (e) {
                           /* GitHub rejects comments on lines outside the diff context. Log
-                          * and continue — the tracking comment still contains all findings. */
+                           * and continue — the tracking comment still contains all findings. */
                           console.log(`  Warning: failed to post comment on ${c.file}:${c.line}: ${e.message}`);
                         }
                       }
@@ -401,4 +427,4 @@ jobs:
                       console.log("Tracking comment updated successfully.");
 
                       if (failed)
-                        core.setFailed(`Failed to post ${comments.length - posted}/${comments.length} inline comment(s).`);
+                        core.setFailed(`Failed to post ${inlineComments.length - posted}/${inlineComments.length} inline comment(s).`);
