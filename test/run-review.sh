@@ -126,7 +126,7 @@ mkdir -p "$RESULT_DIR"
 echo "$PROMPT" > "$RESULT_DIR/prompt.txt"
 
 # --- Build allowed tools list ---
-ALLOWED_TOOLS="Read,LS,Grep,Glob,Task"
+ALLOWED_TOOLS="Read,LS,Grep,Glob,Task,Agent"
 ALLOWED_TOOLS+=",Bash(cat:*),Bash(test:*),Bash(printf:*),Bash(jq:*),Bash(head:*),Bash(tail:*)"
 ALLOWED_TOOLS+=",Bash(git:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(wc:*)"
 ALLOWED_TOOLS+=",Bash(diff:*),Bash(sed:*),Bash(awk:*),Bash(sort:*),Bash(uniq:*)"
