@@ -286,6 +286,7 @@ jobs:
                       --max-turns 100
                       --model claude-opus-4-6
                       --json-schema '${{ env.REVIEW_SCHEMA }}'
+                      --effort high
                       --allowedTools "
                         Read,LS,Grep,Glob,Task,
                         Bash(cat:*),Bash(test:*),Bash(printf:*),Bash(jq:*),Bash(head:*),Bash(tail:*),

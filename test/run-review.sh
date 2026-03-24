@@ -10,6 +10,7 @@ usage() {
     echo "  --model <model>          Model alias or ID (default: claude-sonnet-4-6)"
     echo "  --max-budget-usd <n>     Max budget in USD (default: 15)"
     echo "  --prompt <file>          Prompt template file (default: prompt-template.txt)"
+    echo "  --effort <level>         Effort level: low, medium, high, max (default: high)"
     echo "  --fresh                  Simulate first review (hide existing comments)"
     echo ""
     echo "Example: $0 facebook/bpfilter 464 --model sonnet"
@@ -20,6 +21,7 @@ usage() {
 MODEL="claude-sonnet-4-6"
 BUDGET="15"
 PROMPT_FILE=""
+EFFORT="high"
 FRESH=false
 
 # Parse args
@@ -29,6 +31,7 @@ while [[ $# -gt 0 ]]; do
         --model) MODEL="$2"; shift 2 ;;
         --max-budget-usd) BUDGET="$2"; shift 2 ;;
         --prompt) PROMPT_FILE="$2"; shift 2 ;;
+        --effort) EFFORT="$2"; shift 2 ;;
         --fresh) FRESH=true; shift ;;
         --help|-h) usage ;;
         *) POSITIONAL+=("$1"); shift ;;
@@ -133,6 +136,7 @@ SCHEMA="$(cat "$SCHEMA_PATH")"
 # --- Run Claude ---
 echo "==> Running Claude review..."
 echo "    Model:    $MODEL"
+echo "    Effort:   $EFFORT"
 echo "    Budget:   \$$BUDGET"
 echo "    Repo:     $REPO_DIR"
 echo "    Snapshot: $SNAPSHOT_DIR"
@@ -146,6 +150,7 @@ cd "$REPO_DIR"
 echo "$PROMPT" | claude -p \
     --model "$MODEL" \
     --max-budget-usd "$BUDGET" \
+    --effort "$EFFORT" \
     --output-format json \
     --json-schema "$SCHEMA" \
     --verbose \

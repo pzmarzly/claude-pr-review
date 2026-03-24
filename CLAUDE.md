@@ -16,7 +16,7 @@ so you can iterate on the prompt and config without round-tripping through CI.
 ./test/snapshot.sh <owner/repo> <pr-number>
 
 # 2. Run the review locally
-./test/run-review.sh <owner/repo> <pr-number> [--model sonnet] [--max-budget-usd 15]
+./test/run-review.sh <owner/repo> <pr-number> [--model sonnet] [--max-budget-usd 15] [--effort high]
 
 # 2b. Run as if no prior reviews exist (tests inline comment emission)
 ./test/run-review.sh <owner/repo> <pr-number> --fresh
